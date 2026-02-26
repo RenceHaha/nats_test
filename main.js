@@ -124,6 +124,22 @@ async function startServer() {
                             }))
                         );
                         break;
+                    
+                    // ─── REMOTE DEVICE CONTROL ───
+                    case 'toggle-device':
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'device-toggled',
+                                channelName,
+                                data: { 
+                                    targetUid: msg.targetUid, 
+                                    device: msg.device, // 'mic' or 'camera'
+                                    state: msg.state // true (on) or false (off)
+                                },
+                            }))
+                        );
+                        break;
                 }
             } catch (err) {
                 console.error('WebSocket message error:', err);
