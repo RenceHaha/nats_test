@@ -124,21 +124,51 @@ async function startServer() {
                             }))
                         );
                         break;
-                    
+
                     // ─── REMOTE DEVICE CONTROL ───
                     case 'toggle-device':
+                        // First, update the database so new joiners get the correct status
+                        if (msg.device === 'camera') {
+                            await pool.query(
+                                'UPDATE meeting_participants SET is_camera_off = ? WHERE channel_name = ? AND uid = ?',
+                                [!msg.state, channelName, String(msg.targetUid)] // if turning on (msg.state=true), is_camera_off is false
+                            );
+                        } else if (msg.device === 'mic') {
+                            await pool.query(
+                                'UPDATE meeting_participants SET is_muted = ? WHERE channel_name = ? AND uid = ?',
+                                [!msg.state, channelName, String(msg.targetUid)] // if turning on (msg.state=true), is_muted is false
+                            );
+                        }
+
+                        // Send the direct toggle command exclusively to the target user so their hardware turns on/off
                         nc.publish(
                             `meeting.${channelName}`,
                             sc.encode(JSON.stringify({
                                 action: 'device-toggled',
                                 channelName,
-                                data: { 
-                                    targetUid: msg.targetUid, 
+                                data: {
+                                    targetUid: msg.targetUid,
                                     device: msg.device, // 'mic' or 'camera'
                                     state: msg.state // true (on) or false (off)
                                 },
                             }))
                         );
+
+                        // Wait a tiny bit and also broadcast the new status so everyone's UI updates immediately
+                        setTimeout(() => {
+                            nc.publish(
+                                `meeting.${channelName}`,
+                                sc.encode(JSON.stringify({
+                                    action: 'participant-status-changed',
+                                    channelName,
+                                    data: {
+                                        uid: msg.targetUid,
+                                        isCameraOff: msg.device === 'camera' ? !msg.state : undefined,
+                                        isMuted: msg.device === 'mic' ? !msg.state : undefined
+                                    },
+                                }))
+                            );
+                        }, 100);
                         break;
                 }
             } catch (err) {
