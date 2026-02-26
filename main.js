@@ -170,6 +170,20 @@ async function startServer() {
                             );
                         }, 100);
                         break;
+
+                    // ─── END MEETING FOR ALL ───
+                    case 'end-meeting':
+                        console.log(`[WS] End meeting: channel=${channelName}, by uid=${uid} (${msg.username})`);
+                        // Broadcast meeting-ended to all clients in the channel via NATS
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'meeting-ended',
+                                channelName,
+                                endedBy: msg.username || 'Host',
+                            }))
+                        );
+                        break;
                 }
             } catch (err) {
                 console.error('WebSocket message error:', err);
