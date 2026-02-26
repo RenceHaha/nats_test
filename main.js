@@ -13,7 +13,7 @@ const pool = mysql.createPool({
 
 async function startServer() {
     // Connect to NATS
-    const nc = await connect({ servers: 'nats://localhost:4222' });
+    const nc = await connect({ servers: 'nats://127.0.0.1:4222' });
     const sc = StringCodec();
     // Start WebSocket server
     const wss = new WebSocket.Server({ port: 8081 });
