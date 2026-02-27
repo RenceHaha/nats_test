@@ -203,6 +203,7 @@ async function startServer() {
                         break;
 
                     case 'participant-face-warning':
+                        console.log(`[WS] Face warning: channel=${channelName}, uid=${uid}, isFaceMissing=${msg.isFaceMissing}`);
                         // Broadcast face detection warning to all clients in channel
                         nc.publish(
                             `meeting.${channelName}`,
