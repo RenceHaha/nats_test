@@ -170,6 +170,19 @@ async function startServer() {
                             );
                         }, 100);
                         break;
+
+                    // ─── FACE DETECTION WARNING ───
+                    case 'participant-face-warning':
+                        // Broadcast face detection warning to all clients in channel
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'participant-face-warning',
+                                channelName,
+                                data: { uid, isFaceMissing: msg.isFaceMissing },
+                            }))
+                        );
+                        break;
                 }
             } catch (err) {
                 console.error('WebSocket message error:', err);
