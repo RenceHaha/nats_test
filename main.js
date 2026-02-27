@@ -184,6 +184,25 @@ async function startServer() {
                             }))
                         );
                         break;
+
+                    // ─── BREAK APPROVED NOTIFICATION ───
+                    case 'break-approved':
+                        console.log(`[WS] Break approved: channel=${channelName}, targetUid=${msg.targetUid}, duration=${msg.durationMinutes}m`);
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'break-approved',
+                                channelName,
+                                data: {
+                                    requestId: msg.requestId,
+                                    targetUid: msg.targetUid,
+                                    username: msg.username,
+                                    durationMinutes: msg.durationMinutes,
+                                    expiresAt: msg.expiresAt,
+                                },
+                            }))
+                        );
+                        break;
                 }
             } catch (err) {
                 console.error('WebSocket message error:', err);
