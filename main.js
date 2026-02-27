@@ -170,6 +170,49 @@ async function startServer() {
                             );
                         }, 100);
                         break;
+
+                    case 'end-meeting':
+                        console.log(`[WS] End meeting: channel=${channelName}, by uid=${uid} (${msg.username})`);
+                        // Broadcast meeting-ended to all clients in the channel via NATS
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'meeting-ended',
+                                channelName,
+                                endedBy: msg.username || 'Host',
+                            }))
+                        );
+                        break;
+
+                    case 'break-approved':
+                        console.log(`[WS] Break approved: channel=${channelName}, targetUid=${msg.targetUid}, duration=${msg.durationMinutes}m`);
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'break-approved',
+                                channelName,
+                                data: {
+                                    requestId: msg.requestId,
+                                    targetUid: msg.targetUid,
+                                    username: msg.username,
+                                    durationMinutes: msg.durationMinutes,
+                                    expiresAt: msg.expiresAt,
+                                },
+                            }))
+                        );
+                        break;
+
+                    case 'participant-face-warning':
+                        // Broadcast face detection warning to all clients in channel
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'participant-face-warning',
+                                channelName,
+                                data: { uid, isFaceMissing: msg.isFaceMissing },
+                            }))
+                        );
+                        break;
                 }
             } catch (err) {
                 console.error('WebSocket message error:', err);
