@@ -279,6 +279,70 @@ async function startServer() {
                             }))
                         );
                         break;
+
+                    // ─── REAL-TIME REACTIONS (replaces HTTP polling) ───
+                    case 'raise-hand':
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'hand-raised',
+                                channelName,
+                                data: {
+                                    uid,
+                                    username: msg.username,
+                                    isRaised: msg.isRaised, // true = raised, false = lowered
+                                },
+                            }))
+                        );
+                        break;
+
+                    case 'send-reaction':
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'reaction-received',
+                                channelName,
+                                data: {
+                                    uid,
+                                    username: msg.username,
+                                    emoji: msg.emoji,
+                                    createdAt: new Date().toISOString(),
+                                },
+                            }))
+                        );
+                        break;
+
+                    // ─── REAL-TIME BREAK REQUESTS (replaces HTTP polling) ───
+                    case 'break-submitted':
+                        // Student submitted a break request — notify teacher
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'break-request-new',
+                                channelName,
+                                data: {
+                                    requestId: msg.requestId,
+                                    uid,
+                                    username: msg.username,
+                                },
+                            }))
+                        );
+                        break;
+
+                    case 'break-denied':
+                        // Teacher denied a break request — notify student
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'break-denied',
+                                channelName,
+                                data: {
+                                    requestId: msg.requestId,
+                                    targetUid: msg.targetUid,
+                                },
+                            }))
+                        );
+                        break;
                 }
             } catch (err) {
                 console.error('WebSocket message error:', err);
