@@ -22,9 +22,71 @@ async function startServer() {
     // Track connected clients by channel
     const channels = new Map(); // channelName -> Set<WebSocket>
 
+    // Shared NATS subscriptions per channel (Imp 2)
+    // channelName -> { sub: NatsSubscription, refCount: number }
+    const channelSubs = new Map();
+
+    /**
+     * Get or create a shared NATS subscription for a channel.
+     * Messages are fanned out to all WS clients in that channel.
+     */
+    function getOrCreateChannelSub(channelName) {
+        if (channelSubs.has(channelName)) {
+            channelSubs.get(channelName).refCount++;
+            return;
+        }
+
+        const sub = nc.subscribe(`meeting.${channelName}`);
+        channelSubs.set(channelName, { sub, refCount: 1 });
+
+        // Fan-out: deliver each NATS message to all WS clients in the channel
+        (async () => {
+            for await (const m of sub) {
+                const clients = channels.get(channelName);
+                if (!clients) continue;
+
+                const payload = sc.decode(m.data);
+                const parsed = JSON.parse(payload);
+
+                for (const client of clients) {
+                    if (client.readyState !== WebSocket.OPEN) continue;
+
+                    // Imp 3: targeted delivery for device-toggled
+                    // Only send to the target user, not everyone
+                    if (parsed.action === 'device-toggled') {
+                        if (client.clientUid === parsed.data?.targetUid) {
+                            client.send(payload);
+                        }
+                        continue;
+                    }
+
+                    client.send(payload);
+                }
+            }
+        })();
+    }
+
+    /**
+     * Release a reference to a channel's shared NATS subscription.
+     * Unsubscribes when no more clients are using it.
+     */
+    function releaseChannelSub(channelName) {
+        const entry = channelSubs.get(channelName);
+        if (!entry) return;
+
+        entry.refCount--;
+        if (entry.refCount <= 0) {
+            entry.sub.unsubscribe();
+            channelSubs.delete(channelName);
+            console.log(`[NATS] Unsubscribed from meeting.${channelName} (no more clients)`);
+        }
+    }
+
     wss.on('connection', (ws) => {
         let clientChannel = null;
-        let clientUid = null;
+
+        // Store uid on the ws object for targeted delivery (Imp 3)
+        ws.clientUid = null;
 
         ws.on('message', async (raw) => {
             try {
@@ -34,24 +96,27 @@ async function startServer() {
                 switch (action) {
                     // ─── JOIN/SUBSCRIBE TO A CHANNEL ───
                     case 'join':
+                        // Bug 6: Clean up previous subscription if re-joining
+                        if (clientChannel && clientChannel !== channelName) {
+                            // Remove from old channel's client set
+                            if (channels.has(clientChannel)) {
+                                channels.get(clientChannel).delete(ws);
+                            }
+                            // Release ref on old channel's NATS sub
+                            releaseChannelSub(clientChannel);
+                        }
+
                         clientChannel = channelName;
-                        clientUid = uid;
+                        ws.clientUid = uid;
+
                         if (!channels.has(channelName)) {
                             channels.set(channelName, new Set());
                         }
                         channels.get(channelName).add(ws);
 
-                        // Subscribe to NATS for this channel
-                        const sub = nc.subscribe(`meeting.${channelName}`);
-                        (async () => {
-                            for await (const m of sub) {
-                                if (ws.readyState === WebSocket.OPEN) {
-                                    ws.send(sc.decode(m.data));
-                                }
-                            }
-                        })();
+                        // Get or create shared NATS subscription for this channel
+                        getOrCreateChannelSub(channelName);
 
-                        ws.natsSub = sub;
                         ws.send(JSON.stringify({ action: 'joined', channelName }));
                         break;
 
@@ -140,7 +205,7 @@ async function startServer() {
                             );
                         }
 
-                        // Send the direct toggle command exclusively to the target user so their hardware turns on/off
+                        // Send the direct toggle command — delivered only to targetUid via fan-out filter (Imp 3)
                         nc.publish(
                             `meeting.${channelName}`,
                             sc.encode(JSON.stringify({
@@ -154,7 +219,7 @@ async function startServer() {
                             }))
                         );
 
-                        // Wait a tiny bit and also broadcast the new status so everyone's UI updates immediately
+                        // Also broadcast the new status so everyone's UI updates immediately
                         setTimeout(() => {
                             nc.publish(
                                 `meeting.${channelName}`,
@@ -225,7 +290,10 @@ async function startServer() {
             if (clientChannel && channels.has(clientChannel)) {
                 channels.get(clientChannel).delete(ws);
             }
-            if (ws.natsSub) ws.natsSub.unsubscribe();
+            // Release shared subscription reference
+            if (clientChannel) {
+                releaseChannelSub(clientChannel);
+            }
         });
     });
 }
