@@ -343,6 +343,22 @@ async function startServer() {
                             }))
                         );
                         break;
+
+                    // ─── RECITATION: PICK A STUDENT ───
+                    case 'recitation-pick':
+                        console.log(`[WS] Recitation pick: channel=${channelName}, target=${msg.targetUsername} (uid=${msg.targetUid})`);
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'recitation-picked',
+                                channelName,
+                                data: {
+                                    targetUid: msg.targetUid,
+                                    targetUsername: msg.targetUsername,
+                                },
+                            }))
+                        );
+                        break;
                 }
             } catch (err) {
                 console.error('WebSocket message error:', err);
