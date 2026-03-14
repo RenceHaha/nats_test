@@ -26,6 +26,15 @@ async function startServer() {
     // channelName -> { sub: NatsSubscription, refCount: number }
     const channelSubs = new Map();
 
+    // ─── MEETING MODE PERSISTENCE ───
+    // Persists mode even if all clients disconnect (crash fallback).
+    // Values: 'standard' | 'supervised' | 'lock'
+    const channelModes = new Map(); // channelName -> mode string
+
+    function getChannelMode(channelName) {
+        return channelModes.get(channelName) || 'standard';
+    }
+
     /**
      * Get or create a shared NATS subscription for a channel.
      * Messages are fanned out to all WS clients in that channel.
@@ -51,10 +60,24 @@ async function startServer() {
                 for (const client of clients) {
                     if (client.readyState !== WebSocket.OPEN) continue;
 
-                    // Imp 3: targeted delivery for device-toggled
-                    // Only send to the target user, not everyone
+                    // Targeted delivery: device-toggled, device-permission-result -> target uid only
                     if (parsed.action === 'device-toggled') {
                         if (client.clientUid === parsed.data?.targetUid) {
+                            client.send(payload);
+                        }
+                        continue;
+                    }
+
+                    if (parsed.action === 'device-permission-result') {
+                        if (client.clientUid === parsed.data?.targetUid) {
+                            client.send(payload);
+                        }
+                        continue;
+                    }
+
+                    // Supervised mode: permission requests only go to teacher/admin clients
+                    if (parsed.action === 'device-permission-requested') {
+                        if (client.clientRole === 'teacher' || client.clientRole === 'admin') {
                             client.send(payload);
                         }
                         continue;
@@ -85,8 +108,9 @@ async function startServer() {
     wss.on('connection', (ws) => {
         let clientChannel = null;
 
-        // Store uid on the ws object for targeted delivery (Imp 3)
+        // Store uid/role on the ws object for targeted delivery
         ws.clientUid = null;
+        ws.clientRole = null;
 
         ws.on('message', async (raw) => {
             try {
@@ -108,6 +132,7 @@ async function startServer() {
 
                         clientChannel = channelName;
                         ws.clientUid = uid;
+                        ws.clientRole = msg.role || null; // store role for targeted delivery
 
                         if (!channels.has(channelName)) {
                             channels.set(channelName, new Set());
@@ -117,7 +142,9 @@ async function startServer() {
                         // Get or create shared NATS subscription for this channel
                         getOrCreateChannelSub(channelName);
 
-                        ws.send(JSON.stringify({ action: 'joined', channelName }));
+                        // Send join ack with current mode — crash fallback for reconnects
+                        const currentMode = getChannelMode(channelName);
+                        ws.send(JSON.stringify({ action: 'joined', channelName, currentMode }));
                         break;
 
                     // ─── DATABASE: GET DATA ───
@@ -234,6 +261,67 @@ async function startServer() {
                                 }))
                             );
                         }, 100);
+                        break;
+
+                    // ─── MEETING MODE CONTROL (teacher/admin only) ───
+                    case 'set-meeting-mode':
+                        // Validate role server-side
+                        if (ws.clientRole !== 'teacher' && ws.clientRole !== 'admin') {
+                            ws.send(JSON.stringify({ action: 'error', message: 'Not authorized to set mode.' }));
+                            break;
+                        }
+                        const newMode = msg.mode;
+                        if (!['standard', 'supervised', 'lock'].includes(newMode)) break;
+
+                        // Persist mode — survives client reconnects and crashes
+                        channelModes.set(channelName, newMode);
+                        console.log(`[Mode] ${channelName} → ${newMode} (by uid=${uid})`);
+
+                        // Broadcast to all participants in the channel
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'meeting-mode-changed',
+                                channelName,
+                                data: { mode: newMode, changedBy: uid },
+                            }))
+                        );
+                        break;
+
+                    // ─── SUPERVISED MODE: STUDENT REQUESTS DEVICE PERMISSION ───
+                    case 'device-permission-request':
+                        // Broadcast to teacher/admin clients only (fan-out filter handles it)
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'device-permission-requested',
+                                channelName,
+                                data: {
+                                    requestId: msg.requestId,
+                                    studentUid: uid,
+                                    username: msg.username,
+                                    device: msg.device, // 'mic' | 'camera' | 'screenshare'
+                                },
+                            }))
+                        );
+                        break;
+
+                    // ─── SUPERVISED MODE: TEACHER APPROVES/DENIES PERMISSION ───
+                    case 'device-permission-result':
+                        // Deliver only to the student who requested (fan-out filter handles it)
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'device-permission-result',
+                                channelName,
+                                data: {
+                                    requestId: msg.requestId,
+                                    targetUid: msg.targetUid,
+                                    device: msg.device,
+                                    approved: msg.approved, // true or false
+                                },
+                            }))
+                        );
                         break;
 
                     case 'end-meeting':
