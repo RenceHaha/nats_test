@@ -1,5 +1,6 @@
 const WebSocket = require('ws');
 const { connect, StringCodec } = require('nats');
+const http = require('http');
 const mysql = require('mysql2/promise');
 require('dotenv').config();
 
@@ -15,12 +16,55 @@ async function startServer() {
     // Connect to NATS
     const nc = await connect({ servers: 'nats://127.0.0.1:4222' });
     const sc = StringCodec();
-    // Start WebSocket server
-    const wss = new WebSocket.Server({ port: 8081 });
-    console.log('WebSocket server running on ws://localhost:8081');
 
-    // Track connected clients by channel
+    // Track connected clients by channel (the live source of truth)
     const channels = new Map(); // channelName -> Set<WebSocket>
+
+    // ── HTTP server: handles /check-teacher/:channel (and WebSocket upgrades) ──
+    const server = http.createServer((req, res) => {
+        // CORS headers so Flutter can reach this from any origin
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+
+        if (req.method === 'OPTIONS') {
+            res.writeHead(204);
+            res.end();
+            return;
+        }
+
+        // GET /check-teacher/<channelName>
+        const match = req.url && req.url.match(/^\/check-teacher\/(.+)$/);
+        if (req.method === 'GET' && match) {
+            const channelName = decodeURIComponent(match[1]);
+            const clients = channels.get(channelName) || new Set();
+            // Check live connections for teacher or admin role
+            const teacherPresent = [...clients].some(
+                (c) => c.clientRole === 'teacher' || c.clientRole === 'admin'
+            );
+            const count = clients.size;
+            console.log(`[HTTP] check-teacher/${channelName} → teacherPresent=${teacherPresent}, connected=${count}`);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ teacherPresent, connectedCount: count }));
+            return;
+        }
+
+        // Health check
+        if (req.method === 'GET' && req.url === '/health') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ status: 'ok', channels: channels.size }));
+            return;
+        }
+
+        res.writeHead(404);
+        res.end('Not found');
+    });
+
+    // Attach WebSocket server to the same HTTP server
+    const wss = new WebSocket.Server({ server });
+    server.listen(8081, () => {
+        console.log('Server running on port 8081 (HTTP + WebSocket)');
+    });
+
 
     // Shared NATS subscriptions per channel (Imp 2)
     // channelName -> { sub: NatsSubscription, refCount: number }
