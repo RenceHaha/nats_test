@@ -149,6 +149,22 @@ async function startServer() {
                         continue;
                     }
 
+                    // Targeted: break-approved → target student only
+                    if (parsed.action === 'break-approved') {
+                        if (client.clientUid === parsed.data?.targetUid) {
+                            client.send(payload);
+                        }
+                        continue;
+                    }
+
+                    // Targeted: break-denied → target student only
+                    if (parsed.action === 'break-denied') {
+                        if (client.clientUid === parsed.data?.targetUid) {
+                            client.send(payload);
+                        }
+                        continue;
+                    }
+
                     client.send(payload);
                 }
             }
@@ -212,6 +228,20 @@ async function startServer() {
                         // Send join ack with current mode — crash fallback for reconnects
                         const currentMode = getChannelMode(channelName);
                         ws.send(JSON.stringify({ action: 'joined', channelName, currentMode }));
+
+                        // Push the current participants list directly to the new joiner
+                        // so they immediately know everyone already in the channel
+                        const existingParticipants = [...channels.get(channelName)]
+                            .filter(c => c !== ws && c.clientUid != null && c.clientUsername)
+                            .map(c => ({ uid: c.clientUid, username: c.clientUsername, role: c.clientRole }));
+                        if (existingParticipants.length > 0) {
+                            ws.send(JSON.stringify({
+                                action: 'participants-list',
+                                channelName,
+                                data: existingParticipants,
+                            }));
+                            console.log(`[WS] participants-list sent to uid=${uid}: ${existingParticipants.map(p => p.username).join(', ')}`);
+                        }
 
                         // Broadcast to all other clients so they can immediately show the correct name
                         nc.publish(
