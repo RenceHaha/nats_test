@@ -48,6 +48,28 @@ async function startServer() {
             return;
         }
 
+        // GET /get-user/<channelName>/<uid>
+        const userMatch = req.url && req.url.match(/^\/get-user\/([^/]+)\/(.+)$/);
+        if (req.method === 'GET' && userMatch) {
+            const channelName = decodeURIComponent(userMatch[1]);
+            const uid = parseInt(userMatch[2], 10);
+            const clients = channels.get(channelName) || new Set();
+            const client = [...clients].find((c) => c.clientUid === uid);
+            if (client) {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                    username: client.clientUsername || 'Participant',
+                    role: client.clientRole || 'student',
+                    isScreenSharing: false,
+                }));
+            } else {
+                // Client not found in live connections — return 404 so Flutter falls back to DB
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'not found' }));
+            }
+            return;
+        }
+
         // Health check
         if (req.method === 'GET' && req.url === '/health') {
             res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -176,7 +198,8 @@ async function startServer() {
 
                         clientChannel = channelName;
                         ws.clientUid = uid;
-                        ws.clientRole = msg.role || null; // store role for targeted delivery
+                        ws.clientRole = msg.role || null;       // store for targeted delivery & HTTP endpoints
+                        ws.clientUsername = msg.username || null; // store for /get-user endpoint
 
                         if (!channels.has(channelName)) {
                             channels.set(channelName, new Set());
