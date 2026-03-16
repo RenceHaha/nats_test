@@ -212,6 +212,17 @@ async function startServer() {
                         // Send join ack with current mode — crash fallback for reconnects
                         const currentMode = getChannelMode(channelName);
                         ws.send(JSON.stringify({ action: 'joined', channelName, currentMode }));
+
+                        // Broadcast to all other clients so they can immediately show the correct name
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'participant-joined',
+                                channelName,
+                                data: { uid, username: ws.clientUsername, role: ws.clientRole },
+                            }))
+                        );
+                        console.log(`[WS] participant-joined: uid=${uid}, username=${ws.clientUsername}, role=${ws.clientRole}, channel=${channelName}`);
                         break;
 
                     // ─── DATABASE: GET DATA ───
