@@ -395,6 +395,34 @@ async function startServer() {
                             }))
                         );
                         break;
+                        
+                    // ─── WAITING ROOM CONTROL (teacher/admin only) ───
+                    case 'toggle-waiting-room':
+                        if (ws.clientRole !== 'teacher' && ws.clientRole !== 'admin') {
+                            ws.send(JSON.stringify({ action: 'error', message: 'Not authorized.' }));
+                            break;
+                        }
+                        
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'waiting-room-toggled',
+                                channelName,
+                                data: { enabled: msg.enabled, changedBy: uid },
+                            }))
+                        );
+                        break;
+
+                    case 'admission-handled':
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'admission-handled',
+                                channelName,
+                                data: { targetUid: msg.targetUid, status: msg.status },
+                            }))
+                        );
+                        break;
 
                     // ─── SUPERVISED MODE: STUDENT REQUESTS DEVICE PERMISSION ───
                     case 'device-permission-request':
