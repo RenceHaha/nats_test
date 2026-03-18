@@ -396,7 +396,7 @@ async function startServer() {
                         );
                         break;
                         
-                    // ─── WAITING ROOM CONTROL (teacher/admin only) ───
+                    // ─── WAITING ROOM / ADMISSION CONTROL (teacher/admin only) ───
                     case 'toggle-waiting-room':
                         if (ws.clientRole !== 'teacher' && ws.clientRole !== 'admin') {
                             ws.send(JSON.stringify({ action: 'error', message: 'Not authorized.' }));
@@ -409,6 +409,22 @@ async function startServer() {
                                 action: 'waiting-room-toggled',
                                 channelName,
                                 data: { enabled: msg.enabled, changedBy: uid },
+                            }))
+                        );
+                        break;
+
+                    case 'join-request-new':
+                        // Broadcast the new pending join request to all teachers/admins in the room
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'join-request-new',
+                                channelName,
+                                data: {
+                                    uid,
+                                    username: msg.username,
+                                    role: msg.role,
+                                },
                             }))
                         );
                         break;
