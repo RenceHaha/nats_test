@@ -416,14 +416,14 @@ async function startServer() {
                             }))
                         );
                         break;
-                        
+
                     // ─── WAITING ROOM / ADMISSION CONTROL (teacher/admin only) ───
                     case 'toggle-waiting-room':
                         if (ws.clientRole !== 'teacher' && ws.clientRole !== 'admin') {
                             ws.send(JSON.stringify({ action: 'error', message: 'Not authorized.' }));
                             break;
                         }
-                        
+
                         nc.publish(
                             `meeting.${channelName}`,
                             sc.encode(JSON.stringify({
@@ -589,6 +589,22 @@ async function startServer() {
                             }))
                         );
                         break;
+
+                    case 'break-cancelled':
+                        // Student cancelled a break request — notify teacher
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'break-cancelled',
+                                channelName,
+                                data: {
+                                    requestId: msg.requestId,
+                                    uid,
+                                },
+                            }))
+                        );
+                        break;
+
 
                     case 'break-denied':
                         // Teacher denied a break request — notify student
