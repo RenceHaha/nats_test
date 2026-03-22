@@ -77,6 +77,22 @@ async function startServer() {
             return;
         }
 
+        // GET /active-activity/<channelName> — polling endpoint for late-joiners
+        const activityMatch = req.url && req.url.match(/^\/active-activity\/(.+)$/);
+        if (req.method === 'GET' && activityMatch) {
+            const channelName = decodeURIComponent(activityMatch[1]);
+            const activity = channelActivities.get(channelName);
+            if (activity) {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true, data: activity }));
+            } else {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, data: null }));
+            }
+            console.log(`[HTTP] active-activity/${channelName} → ${activity ? 'ACTIVE' : 'none'}`);
+            return;
+        }
+
         res.writeHead(404);
         res.end('Not found');
     });
@@ -96,6 +112,11 @@ async function startServer() {
     // Persists mode even if all clients disconnect (crash fallback).
     // Values: 'standard' | 'supervised' | 'lock'
     const channelModes = new Map(); // channelName -> mode string
+
+    // ─── IN-MEETING ACTIVITY PERSISTENCE ───
+    // Tracks the currently active classwork activity per channel.
+    // Cleared when teacher stops activity or all clients disconnect.
+    const channelActivities = new Map(); // channelName -> { classwork_id, title, type, ... }
 
     function getChannelMode(channelName) {
         return channelModes.get(channelName) || 'standard';
@@ -596,6 +617,46 @@ async function startServer() {
                                     targetUid: msg.targetUid,
                                     targetUsername: msg.targetUsername,
                                 },
+                            }))
+                        );
+                        break;
+
+                    // ─── IN-MEETING CLASSWORK ACTIVITY (teacher launches assignment/question) ───
+                    case 'activity-launched':
+                        if (ws.clientRole !== 'teacher' && ws.clientRole !== 'admin') {
+                            ws.send(JSON.stringify({ action: 'error', message: 'Not authorized to launch activity.' }));
+                            break;
+                        }
+                        const activityData = msg.data || {};
+                        // Persist in memory so late-joiners can poll for it
+                        channelActivities.set(channelName, activityData);
+                        console.log(`[WS] Activity launched: channel=${channelName}, classwork_id=${activityData.classwork_id}, title="${activityData.title}"`);
+
+                        // Broadcast to all clients in the channel
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'activity-launched',
+                                channelName,
+                                data: activityData,
+                            }))
+                        );
+                        break;
+
+                    case 'activity-stopped':
+                        if (ws.clientRole !== 'teacher' && ws.clientRole !== 'admin') {
+                            ws.send(JSON.stringify({ action: 'error', message: 'Not authorized to stop activity.' }));
+                            break;
+                        }
+                        channelActivities.delete(channelName);
+                        console.log(`[WS] Activity stopped: channel=${channelName}`);
+
+                        // Broadcast stop to all clients
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'activity-stopped',
+                                channelName,
                             }))
                         );
                         break;
