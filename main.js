@@ -324,6 +324,7 @@ async function startServer() {
                         // Store on the socket so late-joiners get the correct initial state
                         ws.clientIsCameraOff = msg.isCameraOff;
                         ws.clientIsMuted = msg.isMuted;
+                        ws.clientIsScreenSharing = msg.isScreenSharing === true;
                         
                         await pool.query(
                             'UPDATE meeting_participants SET is_camera_off = ?, is_muted = ? WHERE channel_name = ? AND uid = ?',
@@ -335,7 +336,12 @@ async function startServer() {
                             sc.encode(JSON.stringify({
                                 action: 'participant-status-changed',
                                 channelName,
-                                data: { uid, isCameraOff: msg.isCameraOff, isMuted: msg.isMuted },
+                                data: {
+                                    uid,
+                                    isCameraOff: msg.isCameraOff,
+                                    isMuted: msg.isMuted,
+                                    isScreenSharing: msg.isScreenSharing === true,
+                                },
                             }))
                         );
                         break;
