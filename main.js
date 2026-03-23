@@ -237,6 +237,7 @@ async function startServer() {
                         ws.clientUid = uid;
                         ws.clientRole = msg.role || null;       // store for targeted delivery & HTTP endpoints
                         ws.clientUsername = msg.username || null; // store for /get-user endpoint
+                        ws.clientUserId = msg.user_id || null;   // store exact database ID
 
                         if (!channels.has(channelName)) {
                             channels.set(channelName, new Set());
@@ -258,6 +259,7 @@ async function startServer() {
                                 uid: c.clientUid, 
                                 username: c.clientUsername, 
                                 role: c.clientRole,
+                                user_id: c.clientUserId,
                                 isCameraOff: c.clientIsCameraOff === true, // Default to false if technically unknown, but we'll store it explicitly
                                 isMuted: c.clientIsMuted === true
                             }));
@@ -276,10 +278,10 @@ async function startServer() {
                             sc.encode(JSON.stringify({
                                 action: 'participant-joined',
                                 channelName,
-                                data: { uid, username: ws.clientUsername, role: ws.clientRole },
+                                data: { uid, username: ws.clientUsername, role: ws.clientRole, user_id: ws.clientUserId },
                             }))
                         );
-                        console.log(`[WS] participant-joined: uid=${uid}, username=${ws.clientUsername}, role=${ws.clientRole}, channel=${channelName}`);
+                        console.log(`[WS] participant-joined: uid=${uid}, username=${ws.clientUsername}, role=${ws.clientRole}, user_id=${ws.clientUserId}, channel=${channelName}`);
                         break;
 
                     // ─── DATABASE: GET DATA ───
