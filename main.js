@@ -163,7 +163,7 @@ async function startServer() {
                     }
 
                     // Supervised mode: permission requests only go to teacher/admin clients
-                    if (parsed.action === 'device-permission-requested') {
+                    if (parsed.action === 'device-permission-requested' || parsed.action === 'quiz-submitted') {
                         if (client.clientRole === 'teacher' || client.clientRole === 'admin') {
                             client.send(payload);
                         }
@@ -600,6 +600,18 @@ async function startServer() {
                                     emoji: msg.emoji,
                                     createdAt: new Date().toISOString(),
                                 },
+                            }))
+                        );
+                        break;
+                        
+                    case 'quiz-submitted':
+                        // Student submitted quiz, send their attempt data to teacher/admin
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'quiz-submitted',
+                                channelName,
+                                data: msg.data,
                             }))
                         );
                         break;
