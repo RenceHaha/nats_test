@@ -254,7 +254,13 @@ async function startServer() {
                         // so they immediately know everyone already in the channel
                         const existingParticipants = [...channels.get(channelName)]
                             .filter(c => c !== ws && c.clientUid != null && c.clientUsername)
-                            .map(c => ({ uid: c.clientUid, username: c.clientUsername, role: c.clientRole }));
+                            .map(c => ({ 
+                                uid: c.clientUid, 
+                                username: c.clientUsername, 
+                                role: c.clientRole,
+                                isCameraOff: c.clientIsCameraOff === true, // Default to false if technically unknown, but we'll store it explicitly
+                                isMuted: c.clientIsMuted === true
+                            }));
                         if (existingParticipants.length > 0) {
                             ws.send(JSON.stringify({
                                 action: 'participants-list',
@@ -315,6 +321,10 @@ async function startServer() {
 
                     // ─── DATABASE: UPDATE DATA ───
                     case 'update-status':
+                        // Store on the socket so late-joiners get the correct initial state
+                        ws.clientIsCameraOff = msg.isCameraOff;
+                        ws.clientIsMuted = msg.isMuted;
+                        
                         await pool.query(
                             'UPDATE meeting_participants SET is_camera_off = ?, is_muted = ? WHERE channel_name = ? AND uid = ?',
                             [msg.isCameraOff, msg.isMuted, channelName, uid]
