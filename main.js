@@ -371,6 +371,21 @@ async function startServer() {
                             );
                         }
 
+                        // Also update the in-memory cache for late-joiners (ws.clientIsCameraOff/ws.clientIsMuted)
+                        const channelClients = channels.get(channelName);
+                        if (channelClients) {
+                            for (const client of channelClients) {
+                                if (client.clientUid === msg.targetUid) {
+                                    if (msg.device === 'camera') {
+                                        client.clientIsCameraOff = !msg.state;
+                                    } else if (msg.device === 'mic') {
+                                        client.clientIsMuted = !msg.state;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+
                         // Send the direct toggle command — delivered only to targetUid via fan-out filter (Imp 3)
                         nc.publish(
                             `meeting.${channelName}`,
