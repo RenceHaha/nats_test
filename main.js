@@ -110,7 +110,7 @@ async function startServer() {
 
     // ─── MEETING MODE PERSISTENCE ───
     // Persists mode even if all clients disconnect (crash fallback).
-    // Values: 'standard' | 'supervised' | 'lock'
+    // Values: 'standard' | 'supervised' | 'focus'
     const channelModes = new Map(); // channelName -> mode string
 
     // ─── IN-MEETING ACTIVITY PERSISTENCE ───
@@ -445,7 +445,7 @@ async function startServer() {
                             break;
                         }
                         const newMode = msg.mode;
-                        if (!['standard', 'supervised', 'lock'].includes(newMode)) break;
+                        if (!['standard', 'supervised', 'focus'].includes(newMode)) break;
 
                         // Persist mode — survives client reconnects and crashes
                         channelModes.set(channelName, newMode);
