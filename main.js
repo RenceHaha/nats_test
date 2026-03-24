@@ -238,6 +238,11 @@ async function startServer() {
                         ws.clientRole = msg.role || null;       // store for targeted delivery & HTTP endpoints
                         ws.clientUsername = msg.username || null; // store for /get-user endpoint
                         ws.clientUserId = msg.user_id || null;   // store exact database ID
+                        // Store initial device state so participants-list has the real
+                        // camera/mic status from the moment of joining (not undefined).
+                        // These will be updated later by 'update-status' messages.
+                        ws.clientIsCameraOff = msg.isCameraOff === true;
+                        ws.clientIsMuted = msg.isMuted !== false; // default muted if not specified
 
                         if (!channels.has(channelName)) {
                             channels.set(channelName, new Set());
@@ -278,10 +283,17 @@ async function startServer() {
                             sc.encode(JSON.stringify({
                                 action: 'participant-joined',
                                 channelName,
-                                data: { uid, username: ws.clientUsername, role: ws.clientRole, user_id: ws.clientUserId },
+                                data: {
+                                    uid,
+                                    username: ws.clientUsername,
+                                    role: ws.clientRole,
+                                    user_id: ws.clientUserId,
+                                    isCameraOff: ws.clientIsCameraOff === true,
+                                    isMuted: ws.clientIsMuted === true,
+                                },
                             }))
                         );
-                        console.log(`[WS] participant-joined: uid=${uid}, username=${ws.clientUsername}, role=${ws.clientRole}, user_id=${ws.clientUserId}, channel=${channelName}`);
+                        console.log(`[WS] participant-joined: uid=${uid}, username=${ws.clientUsername}, role=${ws.clientRole}, user_id=${ws.clientUserId}, isCameraOff=${ws.clientIsCameraOff}, channel=${channelName}`);
                         break;
 
                     // ─── DATABASE: GET DATA ───
