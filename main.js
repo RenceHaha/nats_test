@@ -237,7 +237,7 @@ async function startServer() {
                         ws.clientUid = uid;
                         ws.clientRole = msg.role || null;       // store for targeted delivery & HTTP endpoints
                         ws.clientUsername = msg.username || null; // store for /get-user endpoint
-                        ws.clientUserId = msg.user_id || null;   // store exact database ID
+                        ws.clientUserId = msg.user_id != null ? msg.user_id : null;   // store exact database ID
                         // Store initial device state so participants-list has the real
                         // camera/mic status from the moment of joining (not undefined).
                         // These will be updated later by 'update-status' messages.
