@@ -586,6 +586,18 @@ async function startServer() {
                         );
                         break;
 
+                    case 'participant-verifying':
+                        console.log(`[WS] Participant verifying: channel=${channelName}, uid=${uid}, isVerifying=${msg.isVerifying}`);
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'participant-verifying',
+                                channelName,
+                                data: { uid, isVerifying: msg.isVerifying },
+                            }))
+                        );
+                        break;
+
                     // ─── REAL-TIME REACTIONS (replaces HTTP polling) ───
                     case 'raise-hand':
                         nc.publish(
