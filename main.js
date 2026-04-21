@@ -117,6 +117,52 @@ async function startServer() {
     // Tracks the currently active classwork activity per channel.
     // Cleared when teacher stops activity or all clients disconnect.
     const channelActivities = new Map(); // channelName -> { classwork_id, title, type, ... }
+    const channelActivityTimers = new Map(); // channelName -> setTimeout handle
+
+    /**
+     * Stop an activity centrally: clear state, broadcast to clients, and update DB.
+     */
+    async function stopActivityCentrally(channelName) {
+        const activity = channelActivities.get(channelName);
+        if (!activity) return;
+
+        console.log(`[Timer] Auto-stopping activity for channel: ${channelName}`);
+
+        // 1. Clear in-memory state
+        channelActivities.delete(channelName);
+        const timer = channelActivityTimers.get(channelName);
+        if (timer) {
+            clearTimeout(timer);
+            channelActivityTimers.delete(channelName);
+        }
+
+        // 2. Broadcast stop event via NATS
+        nc.publish(
+            `meeting.${channelName}`,
+            sc.encode(
+                JSON.stringify({
+                    action: 'activity-stopped',
+                    channelName,
+                })
+            )
+        );
+
+        // 3. Update DB to close response acceptance
+        const classworkId = activity.classwork_id || activity.quiz_id;
+        if (classworkId) {
+            try {
+                // Determine if it was a quiz or activity to update the correct table/flag
+                // The user specifically mentioned the 'accepting_responses' flag in class_work.
+                await pool.query(
+                    "UPDATE class_work SET accepting_responses = 0 WHERE class_work_id = ? OR quiz_id = ?",
+                    [classworkId, classworkId]
+                );
+                console.log(`[DB] Closed accepting_responses for classwork/quiz: ${classworkId}`);
+            } catch (err) {
+                console.error(`[DB] Failed to close activity in DB:`, err);
+            }
+        }
+    }
 
     function getChannelMode(channelName) {
         return channelModes.get(channelName) || 'standard';
@@ -713,9 +759,35 @@ async function startServer() {
                             break;
                         }
                         const activityData = msg.data || {};
+                        const durationMins = parseInt(activityData.duration_minutes || 30, 10);
+
+                        // Sync launch time if not provided
+                        if (!activityData.launched_at) {
+                            activityData.launched_at = new Date().toISOString();
+                        }
+
+                        // Calculate expiration for students
+                        const expiresAt = new Date(new Date(activityData.launched_at).getTime() + durationMins * 60 * 1000);
+                        activityData.expires_at = expiresAt.toISOString();
+
                         // Persist in memory so late-joiners can poll for it
                         channelActivities.set(channelName, activityData);
-                        console.log(`[WS] Activity launched: channel=${channelName}, classwork_id=${activityData.classwork_id}, title="${activityData.title}"`);
+
+                        // Clear any existing timer for this channel
+                        if (channelActivityTimers.has(channelName)) {
+                            clearTimeout(channelActivityTimers.get(channelName));
+                        }
+
+                        // Schedule auto-stop
+                        const msLeft = expiresAt.getTime() - Date.now();
+                        if (msLeft > 0) {
+                            const timer = setTimeout(() => {
+                                stopActivityCentrally(channelName);
+                            }, msLeft);
+                            channelActivityTimers.set(channelName, timer);
+                        }
+
+                        console.log(`[WS] Activity launched: channel=${channelName}, classwork_id=${activityData.classwork_id}, title="${activityData.title}", expires_at=${activityData.expires_at}`);
 
                         // Broadcast to all clients in the channel
                         nc.publish(
@@ -733,17 +805,8 @@ async function startServer() {
                             ws.send(JSON.stringify({ action: 'error', message: 'Not authorized to stop activity.' }));
                             break;
                         }
-                        channelActivities.delete(channelName);
-                        console.log(`[WS] Activity stopped: channel=${channelName}`);
-
-                        // Broadcast stop to all clients
-                        nc.publish(
-                            `meeting.${channelName}`,
-                            sc.encode(JSON.stringify({
-                                action: 'activity-stopped',
-                                channelName,
-                            }))
-                        );
+                        stopActivityCentrally(channelName);
+                        console.log(`[WS] Activity manually stopped: channel=${channelName}`);
                         break;
                 }
             } catch (err) {
