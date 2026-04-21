@@ -236,7 +236,9 @@ async function startServer() {
                     }
 
                     // Supervised mode: permission requests only go to teacher/admin clients
-                    if (parsed.action === 'device-permission-requested' || parsed.action === 'quiz-submitted') {
+                    if (parsed.action === 'device-permission-requested' || 
+                        parsed.action === 'quiz-submitted' ||
+                        parsed.action === 'activity-submitted') {
                         if (client.clientRole === 'teacher' || client.clientRole === 'admin') {
                             client.send(payload);
                         }
@@ -709,6 +711,18 @@ async function startServer() {
                             `meeting.${channelName}`,
                             sc.encode(JSON.stringify({
                                 action: 'quiz-submitted',
+                                channelName,
+                                data: msg.data,
+                            }))
+                        );
+                        break;
+
+                    case 'activity-submitted':
+                        // Student submitted classwork/question, send to teacher
+                        nc.publish(
+                            `meeting.${channelName}`,
+                            sc.encode(JSON.stringify({
+                                action: 'activity-submitted',
                                 channelName,
                                 data: msg.data,
                             }))
