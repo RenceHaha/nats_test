@@ -93,6 +93,22 @@ async function startServer() {
             return;
         }
 
+        // GET /active-quiz/<channelName> — polling endpoint for late-joiners
+        const quizMatch = req.url && req.url.match(/^\/active-quiz\/(.+)$/);
+        if (req.method === 'GET' && quizMatch) {
+            const channelName = decodeURIComponent(quizMatch[1]);
+            const quiz = channelQuizzes.get(channelName);
+            if (quiz) {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true, data: quiz }));
+            } else {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, data: null }));
+            }
+            console.log(`[HTTP] active-quiz/${channelName} → ${quiz ? 'ACTIVE' : 'none'}`);
+            return;
+        }
+
         res.writeHead(404);
         res.end('Not found');
     });
@@ -119,6 +135,9 @@ async function startServer() {
     const channelActivities = new Map(); // channelName -> { classwork_id, title, type, ... }
     const channelActivityTimers = new Map(); // channelName -> setTimeout handle
 
+    const channelQuizzes = new Map(); // channelName -> { quiz_id, title, type, ... }
+    const channelQuizTimers = new Map(); // channelName -> setTimeout handle
+
     /**
      * Stop an activity centrally: clear state, broadcast to clients, and update DB.
      */
@@ -127,8 +146,6 @@ async function startServer() {
         if (!activity) return;
 
         console.log(`[Timer] Auto-stopping activity for channel: ${channelName}`);
-
-        // 1. Clear in-memory state
         channelActivities.delete(channelName);
         const timer = channelActivityTimers.get(channelName);
         if (timer) {
@@ -136,30 +153,40 @@ async function startServer() {
             channelActivityTimers.delete(channelName);
         }
 
-        // 2. Broadcast stop event via NATS
-        nc.publish(
-            `meeting.${channelName}`,
-            sc.encode(
-                JSON.stringify({
-                    action: 'activity-stopped',
-                    channelName,
-                })
-            )
-        );
+        nc.publish(`meeting.${channelName}`, sc.encode(JSON.stringify({ action: 'activity-stopped', channelName })));
 
-        // 3. Update DB to close response acceptance
-        const classworkId = activity.classwork_id || activity.quiz_id;
+        const classworkId = activity.classwork_id;
         if (classworkId) {
             try {
-                // Determine if it was a quiz or activity to update the correct table/flag
-                // The user specifically mentioned the 'accepting_responses' flag in class_work.
-                await pool.query(
-                    "UPDATE class_work SET accepting_responses = 0 WHERE class_work_id = ? OR quiz_id = ?",
-                    [classworkId, classworkId]
-                );
-                console.log(`[DB] Closed accepting_responses for classwork/quiz: ${classworkId}`);
+                await pool.query("UPDATE class_work SET accepting_responses = 0 WHERE class_work_id = ?", [classworkId]);
+                console.log(`[DB] Closed accepting_responses for classwork: ${classworkId}`);
             } catch (err) {
                 console.error(`[DB] Failed to close activity in DB:`, err);
+            }
+        }
+    }
+
+    async function stopQuizCentrally(channelName) {
+        const quiz = channelQuizzes.get(channelName);
+        if (!quiz) return;
+
+        console.log(`[Timer] Auto-stopping quiz for channel: ${channelName}`);
+        channelQuizzes.delete(channelName);
+        const timer = channelQuizTimers.get(channelName);
+        if (timer) {
+            clearTimeout(timer);
+            channelQuizTimers.delete(channelName);
+        }
+
+        nc.publish(`meeting.${channelName}`, sc.encode(JSON.stringify({ action: 'quiz-stopped', channelName })));
+
+        const quizId = quiz.quiz_id;
+        if (quizId) {
+            try {
+                await pool.query("UPDATE class_work SET accepting_responses = 0 WHERE quiz_id = ?", [quizId]);
+                console.log(`[DB] Closed accepting_responses for quiz: ${quizId}`);
+            } catch (err) {
+                console.error(`[DB] Failed to close quiz in DB:`, err);
             }
         }
     }
@@ -807,6 +834,37 @@ async function startServer() {
                         }
                         stopActivityCentrally(channelName);
                         console.log(`[WS] Activity manually stopped: channel=${channelName}`);
+                        break;
+
+                    case 'quiz-launched':
+                        if (ws.clientRole !== 'teacher' && ws.clientRole !== 'admin') {
+                            ws.send(JSON.stringify({ action: 'error', message: 'Not authorized to launch quiz.' }));
+                            break;
+                        }
+                        const quizData = msg.data || {};
+                        const qDuration = parseInt(quizData.duration_minutes || 15, 10);
+                        if (!quizData.launched_at) quizData.launched_at = new Date().toISOString();
+                        const qExpiresAt = new Date(new Date(quizData.launched_at).getTime() + qDuration * 60 * 1000);
+                        quizData.expires_at = qExpiresAt.toISOString();
+
+                        channelQuizzes.set(channelName, quizData);
+                        if (channelQuizTimers.has(channelName)) clearTimeout(channelQuizTimers.get(channelName));
+
+                        const qMsLeft = qExpiresAt.getTime() - Date.now();
+                        if (qMsLeft > 0) {
+                            channelQuizTimers.set(channelName, setTimeout(() => stopQuizCentrally(channelName), qMsLeft));
+                        }
+                        console.log(`[WS] Quiz launched: channel=${channelName}, quiz_id=${quizData.quiz_id}, title="${quizData.title}"`);
+                        nc.publish(`meeting.${channelName}`, sc.encode(JSON.stringify({ action: 'quiz-launched', channelName, data: quizData })));
+                        break;
+
+                    case 'quiz-stopped':
+                        if (ws.clientRole !== 'teacher' && ws.clientRole !== 'admin') {
+                            ws.send(JSON.stringify({ action: 'error', message: 'Not authorized to stop quiz.' }));
+                            break;
+                        }
+                        stopQuizCentrally(channelName);
+                        console.log(`[WS] Quiz manually stopped: channel=${channelName}`);
                         break;
                 }
             } catch (err) {
