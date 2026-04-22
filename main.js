@@ -164,6 +164,17 @@ async function startServer() {
                 console.error(`[DB] Failed to close activity in DB:`, err);
             }
         }
+
+        // Mark stopped in persistent live_activity_registry
+        try {
+            await pool.query(
+                "UPDATE live_activity_registry SET status = 'stopped', stopped_at = NOW() WHERE channel_name = ? AND status = 'active' ORDER BY launched_at DESC LIMIT 1",
+                [channelName]
+            );
+            console.log(`[Registry] Marked activity stopped for channel: ${channelName}`);
+        } catch (err) {
+            console.error(`[Registry] Failed to mark activity stopped:`, err);
+        }
     }
 
     async function stopQuizCentrally(channelName) {
@@ -188,6 +199,17 @@ async function startServer() {
             } catch (err) {
                 console.error(`[DB] Failed to close quiz in DB:`, err);
             }
+        }
+
+        // Mark stopped in persistent live_activity_registry
+        try {
+            await pool.query(
+                "UPDATE live_activity_registry SET status = 'stopped', stopped_at = NOW() WHERE channel_name = ? AND status = 'active' ORDER BY launched_at DESC LIMIT 1",
+                [channelName]
+            );
+            console.log(`[Registry] Marked quiz stopped for channel: ${channelName}`);
+        } catch (err) {
+            console.error(`[Registry] Failed to mark quiz stopped:`, err);
         }
     }
 
@@ -236,7 +258,7 @@ async function startServer() {
                     }
 
                     // Supervised mode: permission requests only go to teacher/admin clients
-                    if (parsed.action === 'device-permission-requested' || 
+                    if (parsed.action === 'device-permission-requested' ||
                         parsed.action === 'quiz-submitted' ||
                         parsed.action === 'activity-submitted') {
                         if (client.clientRole === 'teacher' || client.clientRole === 'admin') {
@@ -335,9 +357,9 @@ async function startServer() {
                         // so they immediately know everyone already in the channel
                         const existingParticipants = [...channels.get(channelName)]
                             .filter(c => c !== ws && c.clientUid != null && c.clientUsername)
-                            .map(c => ({ 
-                                uid: c.clientUid, 
-                                username: c.clientUsername, 
+                            .map(c => ({
+                                uid: c.clientUid,
+                                username: c.clientUsername,
                                 role: c.clientRole,
                                 user_id: c.clientUserId,
                                 isCameraOff: c.clientIsCameraOff === true, // Default to false if technically unknown, but we'll store it explicitly
@@ -414,7 +436,7 @@ async function startServer() {
                         ws.clientIsCameraOff = msg.isCameraOff;
                         ws.clientIsMuted = msg.isMuted;
                         ws.clientIsScreenSharing = msg.isScreenSharing === true;
-                        
+
                         await pool.query(
                             'UPDATE meeting_participants SET is_camera_off = ?, is_muted = ? WHERE channel_name = ? AND uid = ?',
                             [msg.isCameraOff, msg.isMuted, channelName, uid]
@@ -704,7 +726,7 @@ async function startServer() {
                             }))
                         );
                         break;
-                        
+
                     case 'quiz-submitted':
                         // Student submitted quiz, send their attempt data to teacher/admin
                         nc.publish(
