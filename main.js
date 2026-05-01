@@ -14,7 +14,9 @@ const pool = mysql.createPool({
 
 async function startServer() {
     // Connect to NATS
-    const nc = await connect({ servers: 'nats://127.0.0.1:4222' });
+    const natsUrl = process.env.NATS_URL || 'nats://127.0.0.1:4222';
+    console.log(`[NATS] Connecting to ${natsUrl}...`);
+    const nc = await connect({ servers: natsUrl });
     const sc = StringCodec();
 
     // Track connected clients by channel (the live source of truth)
